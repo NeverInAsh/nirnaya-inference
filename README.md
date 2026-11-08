@@ -31,8 +31,20 @@ python -m decision_index run --engine mmclm.di_engine:NirnayaEngine \
 
 Use `mmclm.di_engine:NirnayaVisionEngine` through `decision-index vision run`, with the options above plus `max_soft_tokens=560` and `max_images=2`.
 
+## Audio
+
+`mmclm.di_engine:NirnayaAudioEngine` takes one or more clips with any request. `mmclm/serve.py` serves it over HTTP:
+
+```bash
+pip install librosa fastapi uvicorn python-multipart
+NIRNAYA_API_KEY=<key> python -m mmclm.serve --model <model dir> --port 8000
+```
+
+`POST /v1/decisions` takes `multipart/form-data` with a `request` part (JSON with `model`, `state` and `questions`) and an `audio` part (WAV), or `application/json` for text only. It returns `{"model": ..., "answers": {<question id>: {"type": "choice", "choice": <option id>, "probabilities": {...}}}}`. It binds to 127.0.0.1 by default and handles one request at a time. The Decision Index has no audio suite, so this engine isn't part of the board submission.
+
 | File | What it does |
 |---|---|
-| `mmclm/di_engine.py` | The two engines |
+| `mmclm/di_engine.py` | The text, vision and audio engines |
+| `mmclm/serve.py` | HTTP endpoint for the audio engine |
 | `mmclm/joint.py` | Prompt layout |
 | `mmclm/jh.py` | The decision head and how it reads the model's hidden states |

@@ -65,7 +65,7 @@ class NirnayaEngine(Engine):
         self.llm = LLM(model=model, runner="pooling", convert="embed", max_model_len=self.max_len,
                        gpu_memory_utilization=float(gpu_mem), enable_prefix_caching=False,
                        pooler_config=PoolerConfig(task="token_embed", tok_pooling_type="ALL", use_activation=False),
-                       limit_mm_per_prompt={"image": int(options.get("max_images") or 0), "audio": 0},
+                       limit_mm_per_prompt={"image": int(options.get("max_images") or 0), "audio": int(options.get("max_audios") or 0)},
                        **({"mm_processor_kwargs": {"max_soft_tokens": int(options["max_soft_tokens"])}} if options.get("max_soft_tokens") else {}))
         self.tok = self.llm.get_tokenizer()
         self.digit_w = jh.digit_rows(model, self.tok)
@@ -289,6 +289,101 @@ class NirnayaVisionEngine(NirnayaEngine):
 
     def __call__(self, state, questions, images=(), prompt=None):
         r = self.batch([{"state": state, "questions": questions, "images": images, "prompt": prompt}])[0]
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+class NirnayaAudioEngine(NirnayaVisionEngine):
+    """Requests with audio: any number of questions over one or more clips, read by the same head. Clips come first in
+    the user turn, then the text. The text is written twice and the head reads the second copy (the clips once).
+
+    Call with audios=[path or bytes, ...]; state is the text context (a string, or JSON-rendered otherwise).
+
+        NirnayaAudioEngine(model=..., head=.../head.pt, temperature_fit=.../t_entropy.json, twice_max=3000, max_model_len=32768)
+    """
+
+    name = "nirnaya"
+    latency = ("vLLM offline pooling engine, one request at a time: audio + joint prompt, one pooling pass, "
+               "the joint head on the same GPU")
+    SAMPLE_RATE = 16000
+
+    def __init__(self, model: str, head: str, max_audios: str | int = 1, **options):
+        options.setdefault("max_images", 0)
+        super().__init__(model=model, head=head, max_audios=max_audios, **options)
+        self.max_audios = int(max_audios)
+        self.provenance |= {"max_audios": self.max_audios, "sample_rate": self.SAMPLE_RATE}
+
+    def _audio(self, a):
+        import io
+
+        import librosa
+
+        return librosa.load(io.BytesIO(a) if isinstance(a, (bytes, bytearray)) else a, sr=self.SAMPLE_RATE, mono=True)[0], self.SAMPLE_RATE
+
+    def _prepare(self, state, questions, audios=()):
+        """One request -> (vLLM prompt, meta) without running the model."""
+        from mmclm import joint
+
+        if len(audios) > self.max_audios:
+            raise Unsupported(f"{len(audios)} clips; this engine was started with max_audios={self.max_audios}")
+        qs = []
+        for qk, q in questions.items():
+            kind = q.get("type", "choice")
+            if kind == "noul":
+                keys, opts = ["true", "false"], ["yes", "no"]
+            else:
+                keys = list(q.get("criteria") or {})
+                if not 2 <= len(keys) <= joint.MAX_OPTIONS:
+                    raise Unsupported(f"{len(keys)} options")
+                opts = [_text(q["criteria"][k]) if q["criteria"][k] is not None and _text(q["criteria"][k]).strip() else k for k in keys]
+            qs.append((qk, kind, keys, {"instruction": _text(q.get("instructions", "")).strip(), "type": kind, "options": opts, "gold": 0}))
+        shown = [(jq, list(range(len(jq["options"])))) for *_, jq in qs]
+        head_text = "" if state in ("", None, {}, []) else _text(state).strip()
+        text = joint.prompt_text(head_text, shown)
+        twice = bool(self.twice_max) and len(self.tok(text, add_special_tokens=False)["input_ids"]) <= self.twice_max
+        clips = [self._audio(a) for a in audios]
+        content = [{"type": "audio"} for _ in clips] + [{"type": "text", "text": f"{text}\n\n{text}" if twice else text}]
+        pr = self.proc.apply_chat_template([{"role": "user", "content": content}], tokenize=False,
+                                           add_generation_prompt=True, enable_thinking=False)
+        if twice and pr.endswith(THOUGHT):
+            pr = pr[: -len(THOUGHT)]
+        vp = {"prompt": pr, "multi_modal_data": {"audio": clips}} if clips else pr
+        return vp, {"qs": qs, "shown": shown, "twice": twice}
+
+    @torch.no_grad()
+    def _finish(self, o, m):
+        """The pooled hidden states of one request -> (response, raw)."""
+        from mmclm import joint
+
+        ids, h = list(o.prompt_token_ids), o.outputs.data
+        if len(ids) + 4 > self.max_len:
+            raise Unsupported("maximum context length exceeded")
+        off = 0
+        if m["twice"]:  # the second copy starts after the first copy's closing instruction
+            instr = self.tok(joint.INSTRUCTION, add_special_tokens=False)["input_ids"]
+            off = self.jh._find(ids, instr, 0) + len(instr)
+        sp = self.jh.joint_spans(self.tok, ids[off:], m["shown"])
+        if sp is None:
+            raise Unsupported("joint layout spans not found")
+        if off:
+            sh = lambda ab: (ab[0] + off, ab[1] + off)  # noqa: E731
+            sp = {"state": sh(sp["state"]), "questions": [sh(x) for x in sp["questions"]], "options": [[sh(x) for x in o_] for o_ in sp["options"]]}
+        feats, logits = self.jh.pool_joint(h, sp, len(h) - 1), []
+        for c0 in range(0, len(feats), 8):
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                lg = self.head(self.jh.collate(feats[c0:c0 + 8], "cuda")).float()
+            logits += [lg[i] for i in range(lg.shape[0])]
+        answers = {}
+        for (qk, kind, keys, jq), lg in zip(m["qs"], logits):
+            x = lg[: len(keys)]
+            probs = {k: float(v) for k, v in zip(keys, (x / self._t(x)).softmax(-1).tolist())}
+            answers[qk] = ({"type": "noul", "noul": probs["true"]} if kind == "noul"
+                           else {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs})
+        return {"model": "nirnaya", "answers": answers, "usage": {"input_tokens": len(ids)}}, {"twice": m["twice"]}
+
+    def __call__(self, state, questions, audios=()):
+        r = self.batch([{"state": state, "questions": questions, "audios": audios}])[0]
         if isinstance(r, Exception):
             raise r
         return r
