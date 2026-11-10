@@ -153,6 +153,7 @@ pre{font-family:var(--mono);font-size:13.5px;line-height:1.5;background:var(--su
 .fam td{white-space:normal}
 @media (max-width:760px){.pipe,.toolflow,.ww,.i59{grid-template-columns:minmax(0,1fr)}.i59d{max-width:none}.parrow{flex-direction:row;padding-block:8px}.parrow svg{transform:rotate(90deg)}.lane{grid-template-columns:minmax(0,1fr);gap:4px}.ob{grid-template-columns:minmax(0,1fr);gap:3px}.d184{grid-template-columns:repeat(31,1fr)}.tr2{grid-template-columns:minmax(0,104px) minmax(0,1fr) 42px 36px}.wgrid{max-width:none}.hero,.calib,.radar{grid-template-columns:minmax(0,1fr)}.drow,.axis{grid-template-columns:minmax(0,1fr)}.axis div:first-child{display:none}body{font-size:17px}}
 @media (prefers-reduced-motion:reduce){.fill{transition:none}}
+.getit{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.getit a{display:inline-flex;align-items:center;gap:6px;font:500 15px var(--body);color:var(--accent);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 14px;text-decoration:none;min-height:40px}.getit a:hover{border-color:var(--accent);background:var(--accent-soft)}
 </style>
 </head>
 <body>
@@ -381,6 +382,19 @@ pre{font-family:var(--mono);font-size:13.5px;line-height:1.5;background:var(--su
     <div class="prose" style="margin-top:20px">
       <p>On the public text index of the <a href="https://huggingface.co/spaces/multimodalart/jev-decision-index" rel="noopener">Decision Index</a>, Turbo scores 61.78, ahead of Jev 1.14’s 60.70, and Flash scores 51.90. On the public vision index, Turbo scores 72.51 and Flash 59.44. These are scores on the public benchmarks.</p>
           </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Try it</div>
+    <h2>Go try it</h2>
+    <div class="prose">
+      <p>Both models are open under Apache 2.0, with no sign-up. Download the weights, run text and image decisions with the inference code, or start its HTTP endpoint and send it audio. Give them your hardest decisions, and tell us where they break.</p>
+    </div>
+    <div class="getit">
+      <a href="https://huggingface.co/Darkrider/nirnaya-flash-1.0" rel="noopener">Nirnaya Flash on Hugging Face →</a>
+      <a href="https://huggingface.co/Darkrider/nirnaya-turbo-1.0" rel="noopener">Nirnaya Turbo on Hugging Face →</a>
+      <a href="https://github.com/NeverInAsh/nirnaya-inference" rel="noopener">Inference code on GitHub →</a>
+    </div>
   </section>
 </div>
 <div id="tip" hidden></div>
