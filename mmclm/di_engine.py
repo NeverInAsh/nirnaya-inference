@@ -92,7 +92,16 @@ class NirnayaEngine(Engine):
             if kind == "noul":
                 keys = ["true", "false"]
                 jq = {"instruction": _text(q.get("instructions", "")).strip(), "type": "noul", "options": ["yes", "no"], "gold": 0}
+            elif kind == "score":
+                # levels as a list of descriptions, level 0 first; shown as a choice over "<level>: <description>" lines
+                if not isinstance(crit, list) or not 2 <= len(crit) <= joint.MAX_OPTIONS:
+                    raise Unsupported("a score question takes criteria as a list of 2 to 255 level descriptions")
+                keys = [str(i) for i in range(len(crit))]
+                jq = {"instruction": _text(q.get("instructions", "")).strip(), "type": "choice",
+                      "options": [f"{i}: {_text(c)}" for i, c in enumerate(crit)], "gold": 0}
             else:
+                if not isinstance(crit, dict):
+                    raise Unsupported("a choice question takes criteria as a mapping of option key to description")
                 keys = list(crit.keys())
                 if len(keys) > joint.MAX_OPTIONS:
                     raise Unsupported(f"{len(keys)} options per choice; the readout supports up to 255")
@@ -178,6 +187,8 @@ class NirnayaEngine(Engine):
             probs = {key: float(x) for key, x in zip(keys, p)}
             if kind == "noul":
                 answers[qk] = {"type": "noul", "noul": probs["true"]}
+            elif kind == "score":  # the expected level, which can fall between levels
+                answers[qk] = {"type": "score", "score": sum(i * x for i, x in enumerate(p)), "probabilities": probs}
             else:
                 answers[qk] = {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs}
         return {"model": "nirnaya", "answers": answers}, None
