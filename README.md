@@ -42,9 +42,18 @@ NIRNAYA_API_KEY=<key> python -m mmclm.serve --model <model dir> --port 8000
 
 `POST /v1/decisions` takes `multipart/form-data` with a `request` part (JSON with `model`, `state` and `questions`) and an `audio` part (WAV), or `application/json` for text only. It returns `{"model": ..., "answers": {<question id>: {"type": "choice", "choice": <option id>, "probabilities": {...}}}}`. It binds to 127.0.0.1 by default and handles one request at a time. The Decision Index has no audio suite, so this engine isn't part of the board submission.
 
+## Reference dumps
+
+`mmclm/dump.py` runs a file of requests through the text engine and records every step, for checking a port against it: token ids, the read-twice flag, spans, per-option logits, temperature and probabilities, and optionally the final hidden states.
+
+```bash
+python -m mmclm.dump --model <model dir> --requests requests.jsonl --out goldens.jsonl --states 3
+```
+
 | File | What it does |
 |---|---|
 | `mmclm/di_engine.py` | The text, vision and audio engines |
 | `mmclm/serve.py` | HTTP endpoint for the audio engine |
 | `mmclm/joint.py` | Prompt layout |
 | `mmclm/jh.py` | The decision head and how it reads the model's hidden states |
+| `mmclm/dump.py` | Reference dumps of the text engine |
